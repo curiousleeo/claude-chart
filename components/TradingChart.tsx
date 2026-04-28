@@ -340,12 +340,13 @@ export default function TradingChart({
       // RSI
       const rsiVals = rsi(closes);
       const rsiMaVals = sma(rsiVals, 14);
-      // Anchor scale to 0–100 so band never shifts on pan/zoom
-      amin.setData(candles.map((c) => ({ time: c.time as never, value: 0 })));
-      amax.setData(candles.map((c) => ({ time: c.time as never, value: 100 })));
-      // Band data: flat lines at 70 and 30 for the shaded zone
-      bu.setData(candles.map((c) => ({ time: c.time as never, value: 70 })));
-      bm.setData(candles.map((c) => ({ time: c.time as never, value: 30 })));
+      // Extend band 1 year into the future so it fills the right empty space
+      const farFuture = Math.floor(Date.now() / 1000) + 365 * 24 * 3600;
+      const bandTimes = [...candles.map((c) => c.time), farFuture];
+      amin.setData(bandTimes.map((t) => ({ time: t as never, value: 0 })));
+      amax.setData(bandTimes.map((t) => ({ time: t as never, value: 100 })));
+      bu.setData(bandTimes.map((t) => ({ time: t as never, value: 70 })));
+      bm.setData(bandTimes.map((t) => ({ time: t as never, value: 30 })));
       rl.setData(candles.map((c, i) => rsiVals[i] != null ? { time: c.time as never, value: rsiVals[i]! } : null).filter(Boolean) as never);
       rm.setData(candles.map((c, i) => rsiMaVals[i] != null ? { time: c.time as never, value: rsiMaVals[i]! } : null).filter(Boolean) as never);
 
