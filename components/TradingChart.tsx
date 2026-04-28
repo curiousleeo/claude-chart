@@ -320,13 +320,12 @@ export default function TradingChart({
 
     fetchCandles(symbol, timeframe).then((candles: Candle[]) => {
       cs.setData(candles as never);
-      mainChart.current?.timeScale().fitContent();
-      macdChart.current?.timeScale().fitContent();
-      rsiChart.current?.timeScale().fitContent();
-      // Breathing room to the right of the last candle
-      mainChart.current?.timeScale().applyOptions({ rightOffset: 8 });
-      macdChart.current?.timeScale().applyOptions({ rightOffset: 8 });
-      rsiChart.current?.timeScale().applyOptions({ rightOffset: 8 });
+      // Show last ~150 bars with breathing room — same feel as TradingView default zoom
+      const total = candles.length;
+      const range = { from: total - 150, to: total - 1 + 8 };
+      mainChart.current?.timeScale().setVisibleLogicalRange(range);
+      macdChart.current?.timeScale().setVisibleLogicalRange(range);
+      rsiChart.current?.timeScale().setVisibleLogicalRange(range);
 
       const closes = candles.map((c) => c.close);
 
