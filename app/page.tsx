@@ -68,10 +68,9 @@ export default function Page() {
     if (!mountedRef.current) return;
     clearTimers();
 
-    // Mixed content guard — browser silently blocks ws:// from https:// pages
+    // Mixed content guard — browser blocks ws:// from https:// pages, just stay disconnected quietly
     if (typeof window !== "undefined" && window.location.protocol === "https:" && url.startsWith("ws://")) {
       setWsStatus("disconnected");
-      setShowSettings(true);
       return;
     }
 
@@ -155,9 +154,11 @@ export default function Page() {
     connect(wsInput);
   }
 
+  const isHttps = typeof window !== "undefined" && window.location.protocol === "https:" && wsInput.startsWith("ws://");
   const dotColor = wsStatus === "connected" ? "#22c55e" : wsStatus === "connecting" ? "#eab308" : "#ef4444";
   const statusText = wsStatus === "connected" ? "MCP connected"
     : wsStatus === "connecting" ? "MCP connecting…"
+    : isHttps ? "MCP local only"
     : retryIn ? `MCP retry in ${retryIn}s`
     : "MCP disconnected";
 
