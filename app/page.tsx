@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import TradingChart from "../components/TradingChart";
 import type { Symbol, Timeframe, MCPCommand, DrawingRecord } from "../lib/types";
 
-const DEFAULT_WS = "ws://localhost:8765";
+const DEFAULT_WS = "wss://claude-chart-relay-production.up.railway.app";
 const MIN_DELAY = 2000;
 const MAX_DELAY = 30000;
 
@@ -154,11 +154,9 @@ export default function Page() {
     connect(wsInput);
   }
 
-  const isHttps = typeof window !== "undefined" && window.location.protocol === "https:" && wsInput.startsWith("ws://");
   const dotColor = wsStatus === "connected" ? "#22c55e" : wsStatus === "connecting" ? "#eab308" : "#ef4444";
   const statusText = wsStatus === "connected" ? "MCP connected"
     : wsStatus === "connecting" ? "MCP connecting…"
-    : isHttps ? "MCP local only"
     : retryIn ? `MCP retry in ${retryIn}s`
     : "MCP disconnected";
 
