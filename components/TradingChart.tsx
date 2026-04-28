@@ -104,7 +104,11 @@ interface Props {
   commandRef: React.MutableRefObject<((cmd: MCPCommand) => void) | null>;
 }
 
-const TIMEFRAMES: Timeframe[] = ["1m", "5m", "15m", "1h", "4h", "1d"];
+const TF_GROUPS: { label: string; items: Timeframe[] }[] = [
+  { label: "MINUTES", items: ["1m", "5m", "15m"] },
+  { label: "HOURS",   items: ["1h", "6h"] },
+  { label: "DAYS",    items: ["1d"] },
+];
 
 // ── Component ────────────────────────────────────────────────────────────────
 
@@ -142,6 +146,8 @@ export default function TradingChart({
   const [macdLabel, setMacdLabel]  = useState({ macd: 0, signal: 0, hist: 0 });
   const [rsiLabel,  setRsiLabel]   = useState({ rsi: 0, ma: 0 });
   const [ohlc,      setOhlc]       = useState({ o: 0, h: 0, l: 0, c: 0, chg: 0, pct: 0 });
+  const [tfOpen,    setTfOpen]     = useState(false);
+  const tfRef = useRef<HTMLDivElement>(null);
 
   const updateDrawings = useCallback((d: DrawingRecord[]) => {
     drawingsRef.current = d;
@@ -202,6 +208,14 @@ export default function TradingChart({
   }, [updateDrawings]);
 
   useEffect(() => { commandRef.current = executeCommand; }, [executeCommand, commandRef]);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (tfRef.current && !tfRef.current.contains(e.target as Node)) setTfOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
 
   // ── Init charts ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -394,14 +408,43 @@ export default function TradingChart({
           ))}
         </div>
         <div style={{ width: 1, height: 12, background: BORDER }} />
-        <div className="flex gap-0.5">
-          {TIMEFRAMES.map((tf) => (
-            <button key={tf} onClick={() => onTimeframeChange(tf)}
-              className="px-2 py-0.5 text-xs rounded transition-colors"
-              style={{ background: timeframe === tf ? "rgba(41,98,255,0.15)" : "transparent", color: timeframe === tf ? "#2962ff" : "#787b86" }}>
-              {tf}
-            </button>
-          ))}
+
+        {/* Timeframe dropdown */}
+        <div ref={tfRef} className="relative">
+          <button
+            onClick={() => setTfOpen((v) => !v)}
+            className="flex items-center gap-1 px-2 py-0.5 text-xs rounded"
+            style={{ background: tfOpen ? "rgba(41,98,255,0.15)" : "transparent", color: "#2962ff" }}>
+            {timeframe}
+            <svg width="8" height="5" viewBox="0 0 8 5" fill="none" style={{ opacity: 0.7 }}>
+              <path d="M1 1l3 3 3-3" stroke="#2962ff" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+          </button>
+
+          {tfOpen && (
+            <div className="absolute top-full left-0 mt-1 z-50 rounded py-1 min-w-[140px]"
+              style={{ background: "#1e2230", border: `1px solid ${BORDER}`, boxShadow: "0 4px 16px rgba(0,0,0,0.4)" }}>
+              {TF_GROUPS.map((group) => (
+                <div key={group.label}>
+                  <div className="px-3 pt-2 pb-1 text-[10px] font-semibold tracking-widest" style={{ color: "#4a4f5e" }}>
+                    {group.label}
+                  </div>
+                  {group.items.map((tf) => (
+                    <button key={tf}
+                      onClick={() => { onTimeframeChange(tf); setTfOpen(false); }}
+                      className="w-full text-left px-3 py-1.5 text-xs transition-colors"
+                      style={{
+                        background: timeframe === tf ? "rgba(41,98,255,0.15)" : "transparent",
+                        color: timeframe === tf ? "#2962ff" : "#d1d4dc",
+                      }}>
+                      {tf === "1m" ? "1 minute" : tf === "5m" ? "5 minutes" : tf === "15m" ? "15 minutes"
+                        : tf === "1h" ? "1 hour" : tf === "6h" ? "6 hours" : "1 day"}
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
