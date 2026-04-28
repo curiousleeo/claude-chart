@@ -249,18 +249,22 @@ export default function TradingChart({
 
     // Band fill: upper area (0→70, light purple) + mask (0→30, dark bg) = shaded 30–70 zone
     const bandUpper = rc.addAreaSeries({
-      lineColor: "rgba(149,117,205,0.5)", lineWidth: 1,
-      topColor: "rgba(149,117,205,0.18)", bottomColor: "rgba(149,117,205,0.18)",
+      lineColor: "transparent", lineWidth: 1,
+      topColor: "rgba(149,117,205,0.15)", bottomColor: "rgba(149,117,205,0.15)",
       lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
     });
     const bandMask = rc.addAreaSeries({
-      lineColor: "rgba(149,117,205,0.5)", lineWidth: 1,
+      lineColor: "transparent", lineWidth: 1,
       topColor: BG, bottomColor: BG,
       lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
     });
     // RSI lines on top of band
     const rsiL  = rc.addLineSeries({ color: "#7b1fa2", lineWidth: 1, lastValueVisible: true, priceLineVisible: false });
     const rsiMa = rc.addLineSeries({ color: "#f59e0b", lineWidth: 1, lastValueVisible: true, priceLineVisible: false });
+    // Dashed reference lines at 70, 50, 30 — like TradingView
+    rsiL.createPriceLine({ price: 70, color: "rgba(149,117,205,0.5)", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: "" });
+    rsiL.createPriceLine({ price: 50, color: "rgba(120,123,134,0.35)", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: "" });
+    rsiL.createPriceLine({ price: 30, color: "rgba(149,117,205,0.5)", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: "" });
     rsiChart.current    = rc;
     rsiBandUpper.current = bandUpper;
     rsiBandMask.current  = bandMask;
