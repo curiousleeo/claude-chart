@@ -340,9 +340,11 @@ export default function TradingChart({
       // RSI
       const rsiVals = rsi(closes);
       const rsiMaVals = sma(rsiVals, 14);
-      // Extend band 1 year into the future so it fills the right empty space
-      const farFuture = Math.floor(Date.now() / 1000) + 365 * 24 * 3600;
-      const bandTimes = [...candles.map((c) => c.time), farFuture];
+      // Extend band 200 bars into the future at the same interval so it always fills the right side
+      const interval = candles[candles.length - 1].time - candles[candles.length - 2].time;
+      const lastTime = candles[candles.length - 1].time;
+      const futureTimes = Array.from({ length: 200 }, (_, i) => lastTime + (i + 1) * interval);
+      const bandTimes = [...candles.map((c) => c.time), ...futureTimes];
       amin.setData(bandTimes.map((t) => ({ time: t as never, value: 0 })));
       amax.setData(bandTimes.map((t) => ({ time: t as never, value: 100 })));
       bu.setData(bandTimes.map((t) => ({ time: t as never, value: 70 })));
