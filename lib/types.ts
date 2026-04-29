@@ -1,6 +1,12 @@
 export type Symbol = "BTC-USD" | "SOL-USD";
 export type Timeframe = "1m" | "5m" | "15m" | "1h" | "6h" | "1d";
 
+export interface Divergence {
+  type: "regular_bullish" | "regular_bearish" | "hidden_bullish" | "hidden_bearish";
+  p1: { time: number; price: number; rsi: number };
+  p2: { time: number; price: number; rsi: number };
+}
+
 export type MCPCommand =
   | { type: "set_symbol"; symbol: Symbol }
   | { type: "set_timeframe"; timeframe: Timeframe }
@@ -17,6 +23,7 @@ export interface ChartState {
   timeframe: Timeframe;
   price: number;
   drawings: DrawingRecord[];
+  divergences: Divergence[];
 }
 
 export interface DrawingRecord {

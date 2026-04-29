@@ -13,7 +13,7 @@ const INTERVAL_MAP: Record<Timeframe, string> = {
   "5m": "5m",
   "15m": "15m",
   "1h": "1h",
-  "4h": "4h",
+  "6h": "6h",
   "1d": "1d",
 };
 

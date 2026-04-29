@@ -10,7 +10,7 @@ import {
   CrosshairMode,
 } from "lightweight-charts";
 import { fetchCandles, subscribeLiveCandle, type Candle } from "../lib/coinbase";
-import type { MCPCommand, Symbol, Timeframe, DrawingRecord } from "../lib/types";
+import type { MCPCommand, Symbol, Timeframe, DrawingRecord, Divergence } from "../lib/types";
 
 // ── Indicator math ──────────────────────────────────────────────────────────
 
@@ -72,6 +72,68 @@ function sma(data: (number | null)[], period: number): (number | null)[] {
   });
 }
 
+// ── Divergence detection ─────────────────────────────────────────────────────
+
+const DIV_COLORS: Record<Divergence["type"], string> = {
+  regular_bullish: "#26a69a",
+  regular_bearish: "#ef5350",
+  hidden_bullish:  "rgba(38,166,154,0.55)",
+  hidden_bearish:  "rgba(239,83,80,0.55)",
+};
+
+function detectDivergences(candles: Candle[], rsiVals: (number | null)[]): Divergence[] {
+  const LOOKBACK = 5;
+  const WINDOW   = 150;
+  const MAX      = 5;
+
+  const start = Math.max(0, candles.length - WINDOW - LOOKBACK);
+  const c = candles.slice(start);
+  const r = rsiVals.slice(start);
+
+  const phIdx: number[] = [];
+  const plIdx: number[] = [];
+
+  for (let i = LOOKBACK; i < c.length - LOOKBACK; i++) {
+    let isHi = true, isLo = true;
+    for (let j = i - LOOKBACK; j <= i + LOOKBACK; j++) {
+      if (j === i) continue;
+      if (c[j].high >= c[i].high) isHi = false;
+      if (c[j].low  <= c[i].low)  isLo = false;
+    }
+    if (isHi) phIdx.push(i);
+    if (isLo) plIdx.push(i);
+  }
+
+  const divs: Divergence[] = [];
+
+  for (let k = 1; k < phIdx.length; k++) {
+    const i1 = phIdx[k - 1], i2 = phIdx[k];
+    const r1 = r[i1], r2 = r[i2];
+    if (r1 == null || r2 == null) continue;
+    const priceHH = c[i2].high > c[i1].high;
+    const rsiHH   = r2 > r1;
+    if (priceHH && !rsiHH)
+      divs.push({ type: "regular_bearish",  p1: { time: c[i1].time, price: c[i1].high, rsi: r1 }, p2: { time: c[i2].time, price: c[i2].high, rsi: r2 } });
+    else if (!priceHH && rsiHH)
+      divs.push({ type: "hidden_bearish",   p1: { time: c[i1].time, price: c[i1].high, rsi: r1 }, p2: { time: c[i2].time, price: c[i2].high, rsi: r2 } });
+  }
+
+  for (let k = 1; k < plIdx.length; k++) {
+    const i1 = plIdx[k - 1], i2 = plIdx[k];
+    const r1 = r[i1], r2 = r[i2];
+    if (r1 == null || r2 == null) continue;
+    const priceLL = c[i2].low < c[i1].low;
+    const rsiLL   = r2 < r1;
+    if (priceLL && !rsiLL)
+      divs.push({ type: "regular_bullish",  p1: { time: c[i1].time, price: c[i1].low,  rsi: r1 }, p2: { time: c[i2].time, price: c[i2].low,  rsi: r2 } });
+    else if (!priceLL && rsiLL)
+      divs.push({ type: "hidden_bullish",   p1: { time: c[i1].time, price: c[i1].low,  rsi: r1 }, p2: { time: c[i2].time, price: c[i2].low,  rsi: r2 } });
+  }
+
+  divs.sort((a, b) => b.p2.time - a.p2.time);
+  return divs.slice(0, MAX);
+}
+
 // ── Chart theme ─────────────────────────────────────────────────────────────
 
 const BG = "#131722";
@@ -101,6 +163,7 @@ interface Props {
   onTimeframeChange: (t: Timeframe) => void;
   onPriceChange: (p: number) => void;
   onDrawingsChange: (d: DrawingRecord[]) => void;
+  onDivergencesChange: (d: Divergence[]) => void;
   commandRef: React.MutableRefObject<((cmd: MCPCommand) => void) | null>;
 }
 
@@ -113,7 +176,7 @@ const TF_GROUPS: { label: string; items: Timeframe[] }[] = [
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function TradingChart({
-  symbol, timeframe, onSymbolChange, onTimeframeChange, onPriceChange, onDrawingsChange, commandRef,
+  symbol, timeframe, onSymbolChange, onTimeframeChange, onPriceChange, onDrawingsChange, onDivergencesChange, commandRef,
 }: Props) {
   // Pane containers
   const macdRef = useRef<HTMLDivElement>(null);
@@ -142,9 +205,14 @@ export default function TradingChart({
   const priceLinesRef = useRef<Map<string, IPriceLine>>(new Map());
   const trendLinesRef = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
 
+  // Divergence overlay lines (cleared and redrawn on every data load)
+  const divLinesRsi  = useRef<ISeriesApi<"Line">[]>([]);
+  const divLinesMain = useRef<ISeriesApi<"Line">[]>([]);
+
   // Indicator labels
   const [macdLabel, setMacdLabel]  = useState({ macd: 0, signal: 0, hist: 0 });
   const [rsiLabel,  setRsiLabel]   = useState({ rsi: 0, ma: 0 });
+  const [divTypes,  setDivTypes]   = useState<Divergence["type"][]>([]);
   const [ohlc,      setOhlc]       = useState({ o: 0, h: 0, l: 0, c: 0, chg: 0, pct: 0 });
   const [tfOpen,    setTfOpen]     = useState(false);
   const tfRef = useRef<HTMLDivElement>(null);
@@ -317,6 +385,8 @@ export default function TradingChart({
       histSeries.current = rsiSeries.current = rsiMaSeries.current = null;
       rsiBandUpper.current = rsiBandMask.current = null;
       rsiAnchorMin.current = rsiAnchorMax.current = null;
+      divLinesRsi.current = [];
+      divLinesMain.current = [];
     };
   }, []);
 
@@ -333,6 +403,12 @@ export default function TradingChart({
     const amin = rsiAnchorMin.current;
     const amax = rsiAnchorMax.current;
     if (!cs || !hs || !ml || !sl || !rl || !rm || !bu || !bm || !amin || !amax) return;
+
+    // Clear previous divergence overlays before fetching new data
+    divLinesRsi.current.forEach((l) => rsiChart.current?.removeSeries(l));
+    divLinesRsi.current = [];
+    divLinesMain.current.forEach((l) => mainChart.current?.removeSeries(l));
+    divLinesMain.current = [];
 
     let unsub: (() => void) | null = null;
 
@@ -376,6 +452,25 @@ export default function TradingChart({
       setRsiLabel({ rsi: rsiVals[lastI] ?? 0, ma: rsiMaVals[lastI] ?? 0 });
       onPriceChange(last.close);
 
+      // Divergence detection and overlay
+      const divs = detectDivergences(candles, rsiVals);
+      onDivergencesChange(divs);
+      setDivTypes(divs.map((d) => d.type));
+      const rc = rsiChart.current;
+      const mc2 = mainChart.current;
+      if (rc && mc2) {
+        for (const d of divs) {
+          const color = DIV_COLORS[d.type];
+          const base = { color, lineWidth: 2 as const, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false };
+          const rl = rc.addLineSeries(base);
+          rl.setData([{ time: d.p1.time as never, value: d.p1.rsi }, { time: d.p2.time as never, value: d.p2.rsi }]);
+          divLinesRsi.current.push(rl);
+          const pl = mc2.addLineSeries(base);
+          pl.setData([{ time: d.p1.time as never, value: d.p1.price }, { time: d.p2.time as never, value: d.p2.price }]);
+          divLinesMain.current.push(pl);
+        }
+      }
+
       // Set zoom after ALL series have data — show last 150 bars with right padding
       const total = candles.length;
       const range = { from: Math.max(0, total - 150), to: total - 1 + 8 };
@@ -388,7 +483,7 @@ export default function TradingChart({
     });
 
     return () => unsub?.();
-  }, [symbol, timeframe, onPriceChange]);
+  }, [symbol, timeframe, onPriceChange, onDivergencesChange]);
 
   const fmt = (n: number, d = 2) => n.toFixed(d);
   const fmtPrice = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -492,6 +587,10 @@ export default function TradingChart({
           <span>14 close</span>
           <span style={{ color: "#9575cd" }}>{fmt(rsiLabel.rsi)}</span>
           <span style={{ color: "#f59e0b" }}>{fmt(rsiLabel.ma)}</span>
+          {divTypes.some((t) => t === "regular_bullish") && <span style={{ color: "#26a69a", fontWeight: 600 }}>bull div</span>}
+          {divTypes.some((t) => t === "regular_bearish") && <span style={{ color: "#ef5350", fontWeight: 600 }}>bear div</span>}
+          {divTypes.some((t) => t === "hidden_bullish")  && <span style={{ color: "rgba(38,166,154,0.8)" }}>hbull</span>}
+          {divTypes.some((t) => t === "hidden_bearish")  && <span style={{ color: "rgba(239,83,80,0.8)" }}>hbear</span>}
         </div>
         <div ref={rsiRef} style={{ width: "100%", height: "100%" }} />
       </div>

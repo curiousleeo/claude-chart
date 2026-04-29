@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import TradingChart from "../components/TradingChart";
-import type { Symbol, Timeframe, MCPCommand, DrawingRecord } from "../lib/types";
+import type { Symbol, Timeframe, MCPCommand, DrawingRecord, Divergence } from "../lib/types";
 
 const DEFAULT_WS = "wss://claude-chart-relay-production.up.railway.app";
 const MIN_DELAY = 2000;
@@ -14,10 +14,11 @@ function getStoredWsUrl(): string {
 }
 
 export default function Page() {
-  const [symbol, setSymbol]       = useState<Symbol>("BTC-USD");
-  const [timeframe, setTimeframe] = useState<Timeframe>("1h");
-  const [price, setPrice]         = useState(0);
-  const [drawings, setDrawings]   = useState<DrawingRecord[]>([]);
+  const [symbol, setSymbol]           = useState<Symbol>("BTC-USD");
+  const [timeframe, setTimeframe]     = useState<Timeframe>("1h");
+  const [price, setPrice]             = useState(0);
+  const [drawings, setDrawings]       = useState<DrawingRecord[]>([]);
+  const [divergences, setDivergences] = useState<Divergence[]>([]);
   const [wsStatus, setWsStatus]   = useState<"connecting" | "connected" | "disconnected">("disconnected");
   const [showSettings, setShowSettings] = useState(false);
   const [wsInput, setWsInput]     = useState(DEFAULT_WS);
@@ -34,13 +35,15 @@ export default function Page() {
   const symbolRef     = useRef(symbol);
   const timeframeRef  = useRef(timeframe);
   const priceRef      = useRef(price);
-  const drawingsRef   = useRef(drawings);
+  const drawingsRef     = useRef(drawings);
+  const divergencesRef  = useRef(divergences);
 
   // Keep refs in sync
   useEffect(() => { symbolRef.current = symbol; }, [symbol]);
   useEffect(() => { timeframeRef.current = timeframe; }, [timeframe]);
   useEffect(() => { priceRef.current = price; }, [price]);
   useEffect(() => { drawingsRef.current = drawings; }, [drawings]);
+  useEffect(() => { divergencesRef.current = divergences; }, [divergences]);
 
   function clearTimers() {
     if (timerRef.current)    { clearTimeout(timerRef.current);  timerRef.current = null; }
@@ -121,6 +124,7 @@ export default function Page() {
             timeframe: timeframeRef.current,
             price: priceRef.current,
             drawings: drawingsRef.current,
+            divergences: divergencesRef.current,
           }));
           return;
         }
@@ -209,6 +213,7 @@ export default function Page() {
             onTimeframeChange={setTimeframe}
             onPriceChange={setPrice}
             onDrawingsChange={setDrawings}
+            onDivergencesChange={setDivergences}
             commandRef={commandRef}
           />
         </div>
@@ -222,7 +227,7 @@ export default function Page() {
                 {d.type === "level" && `$${(d.params.price as number).toLocaleString()}`}
                 {d.type === "zone" && `$${(d.params.priceLow as number).toLocaleString()} – $${(d.params.priceHigh as number).toLocaleString()}`}
                 {d.type === "trendline" && "trend"}
-                {d.params.label && <span style={{ color: "#787b86" }} className="ml-1">({d.params.label as string})</span>}
+                {!!d.params.label && <span style={{ color: "#787b86" }} className="ml-1">({d.params.label as string})</span>}
               </div>
             ))}
           </div>
