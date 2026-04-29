@@ -464,8 +464,9 @@ export default function TradingChart({
       const divs = detectDivergences(candles, rsiVals);
       onDivergencesChange(divs);
       setDivTypes(divs.map((d) => d.type));
+      const rc2 = rsiChart.current;
       const mc2 = mainChart.current;
-      if (mc2 && cs) {
+      if (mc2 && rc2 && cs) {
         // Arrow markers on the candles at each divergence pivot pair
         const markers = divs.flatMap((d) => {
           const isBull = d.type.includes("bullish");
@@ -478,12 +479,19 @@ export default function TradingChart({
         }).sort((a, b) => (a.time as number) - (b.time as number));
         cs.setMarkers(markers);
 
-        // Diagonal line on the price pane connecting the two pivots
         for (const d of divs) {
           const color = DIV_COLORS[d.type];
-          const ls = mc2.addLineSeries({ color, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
-          ls.setData([{ time: d.p1.time as never, value: d.p1.price }, { time: d.p2.time as never, value: d.p2.price }]);
-          divLinesMain.current.push(ls);
+          const lineOpts = { color, lineWidth: 2 as const, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false };
+
+          // Price pane — diagonal line connecting the two pivot prices
+          const priceLine = mc2.addLineSeries(lineOpts);
+          priceLine.setData([{ time: d.p1.time as never, value: d.p1.price }, { time: d.p2.time as never, value: d.p2.price }]);
+          divLinesMain.current.push(priceLine);
+
+          // RSI pane — diagonal line connecting the two RSI values at those same pivots
+          const rsiLine = rc2.addLineSeries(lineOpts);
+          rsiLine.setData([{ time: d.p1.time as never, value: d.p1.rsi }, { time: d.p2.time as never, value: d.p2.rsi }]);
+          divLinesRsi.current.push(rsiLine);
         }
       }
 
