@@ -77,8 +77,15 @@ function sma(data: (number | null)[], period: number): (number | null)[] {
 const DIV_COLORS: Record<Divergence["type"], string> = {
   regular_bullish: "#26a69a",
   regular_bearish: "#ef5350",
-  hidden_bullish:  "rgba(38,166,154,0.55)",
-  hidden_bearish:  "rgba(239,83,80,0.55)",
+  hidden_bullish:  "#4db6ac",
+  hidden_bearish:  "#ef9a9a",
+};
+
+const DIV_LABELS: Record<Divergence["type"], string> = {
+  regular_bullish: "Bull Div",
+  regular_bearish: "Bear Div",
+  hidden_bullish:  "H.Bull",
+  hidden_bearish:  "H.Bear",
 };
 
 function detectDivergences(candles: Candle[], rsiVals: (number | null)[]): Divergence[] {
@@ -131,7 +138,7 @@ function detectDivergences(candles: Candle[], rsiVals: (number | null)[]): Diver
   }
 
   divs.sort((a, b) => b.p2.time - a.p2.time);
-  return divs.slice(0, MAX);
+  return divs.slice(0, 3);
 }
 
 // ── Chart theme ─────────────────────────────────────────────────────────────
@@ -409,6 +416,7 @@ export default function TradingChart({
     divLinesRsi.current = [];
     divLinesMain.current.forEach((l) => mainChart.current?.removeSeries(l));
     divLinesMain.current = [];
+    candleSeries.current?.setMarkers([]);
 
     let unsub: (() => void) | null = null;
 
@@ -456,18 +464,26 @@ export default function TradingChart({
       const divs = detectDivergences(candles, rsiVals);
       onDivergencesChange(divs);
       setDivTypes(divs.map((d) => d.type));
-      const rc = rsiChart.current;
       const mc2 = mainChart.current;
-      if (rc && mc2) {
+      if (mc2 && cs) {
+        // Arrow markers on the candles at each divergence pivot pair
+        const markers = divs.flatMap((d) => {
+          const isBull = d.type.includes("bullish");
+          const color  = DIV_COLORS[d.type];
+          const label  = DIV_LABELS[d.type];
+          return [
+            { time: d.p1.time as never, position: (isBull ? "belowBar" : "aboveBar") as never, color, shape: (isBull ? "arrowUp" : "arrowDown") as never, text: "" },
+            { time: d.p2.time as never, position: (isBull ? "belowBar" : "aboveBar") as never, color, shape: (isBull ? "arrowUp" : "arrowDown") as never, text: label },
+          ];
+        }).sort((a, b) => (a.time as number) - (b.time as number));
+        cs.setMarkers(markers);
+
+        // Diagonal line on the price pane connecting the two pivots
         for (const d of divs) {
           const color = DIV_COLORS[d.type];
-          const base = { color, lineWidth: 2 as const, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false };
-          const rl = rc.addLineSeries(base);
-          rl.setData([{ time: d.p1.time as never, value: d.p1.rsi }, { time: d.p2.time as never, value: d.p2.rsi }]);
-          divLinesRsi.current.push(rl);
-          const pl = mc2.addLineSeries(base);
-          pl.setData([{ time: d.p1.time as never, value: d.p1.price }, { time: d.p2.time as never, value: d.p2.price }]);
-          divLinesMain.current.push(pl);
+          const ls = mc2.addLineSeries({ color, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
+          ls.setData([{ time: d.p1.time as never, value: d.p1.price }, { time: d.p2.time as never, value: d.p2.price }]);
+          divLinesMain.current.push(ls);
         }
       }
 
