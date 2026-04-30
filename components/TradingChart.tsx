@@ -271,6 +271,7 @@ export default function TradingChart({
   const savedMacdH = useRef(110);
   const savedRsiH  = useRef(150);
   const dragRef = useRef<{ which: "macd" | "rsi"; startY: number; startH: number } | null>(null);
+  const priceMargins = useRef({ main: { top: 0.05, bottom: 0.05 }, macd: { top: 0.1, bottom: 0.1 }, rsi: { top: 0.08, bottom: 0.08 } });
 
   const updateDrawings = useCallback((d: DrawingRecord[]) => {
     drawingsRef.current = d;
@@ -356,6 +357,43 @@ export default function TradingChart({
     window.addEventListener("mouseup", onUp);
     return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
   }, []);
+
+  // Scroll-wheel zoom on the right price scale
+  useEffect(() => {
+    const SCALE_W = 65; // approximate px width of the right price axis
+
+    type Entry = { ref: React.RefObject<HTMLDivElement | null>; chart: React.MutableRefObject<IChartApi | null>; m: { top: number; bottom: number } };
+    const entries: Entry[] = [
+      { ref: macdRef, chart: macdChart, m: priceMargins.current.macd },
+      { ref: mainRef, chart: mainChart, m: priceMargins.current.main },
+      { ref: rsiRef,  chart: rsiChart,  m: priceMargins.current.rsi  },
+    ];
+
+    const cleanups: Array<() => void> = [];
+
+    for (const { ref, chart, m } of entries) {
+      const el = ref.current;
+      if (!el) continue;
+
+      const fn = (e: WheelEvent) => {
+        const rect = el.getBoundingClientRect();
+        if (e.clientX < rect.right - SCALE_W) return; // not over price scale
+        e.preventDefault();
+        e.stopPropagation();
+        const c = chart.current;
+        if (!c) return;
+        const step = e.deltaY > 0 ? 0.025 : -0.025; // down = zoom out, up = zoom in
+        m.top    = Math.max(0.01, Math.min(0.48, m.top    + step));
+        m.bottom = Math.max(0.01, Math.min(0.48, m.bottom + step));
+        c.priceScale("right").applyOptions({ scaleMargins: { top: m.top, bottom: m.bottom } });
+      };
+
+      el.addEventListener("wheel", fn, { capture: true, passive: false });
+      cleanups.push(() => el.removeEventListener("wheel", fn, { capture: true }));
+    }
+
+    return () => cleanups.forEach((c) => c());
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Init charts ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -576,12 +614,35 @@ export default function TradingChart({
   }, [symbol, timeframe, onPriceChange, onDivergencesChange]);
 
   function toggleMacd() {
-    if (macdCollapsed) { setMacdCollapsed(false); setMacdChartH(savedMacdH.current); }
-    else { savedMacdH.current = macdChartH; setMacdCollapsed(true); setMacdChartH(0); }
+    if (macdCollapsed) {
+      const h = savedMacdH.current;
+      setMacdCollapsed(false);
+      setMacdChartH(h);
+      // Chart was hidden via display:none — now resize it to match the restored div height
+      requestAnimationFrame(() => {
+        if (macdChart.current && macdRef.current)
+          macdChart.current.resize(macdRef.current.clientWidth, h);
+      });
+    } else {
+      savedMacdH.current = macdChartH;
+      setMacdCollapsed(true);
+      // Don't resize chart to 0 — lightweight-charts doesn't handle height=0
+      // The div gets display:none so the chart is hidden without touching its internals
+    }
   }
   function toggleRsi() {
-    if (rsiCollapsed) { setRsiCollapsed(false); setRsiChartH(savedRsiH.current); }
-    else { savedRsiH.current = rsiChartH; setRsiCollapsed(true); setRsiChartH(0); }
+    if (rsiCollapsed) {
+      const h = savedRsiH.current;
+      setRsiCollapsed(false);
+      setRsiChartH(h);
+      requestAnimationFrame(() => {
+        if (rsiChart.current && rsiRef.current)
+          rsiChart.current.resize(rsiRef.current.clientWidth, h);
+      });
+    } else {
+      savedRsiH.current = rsiChartH;
+      setRsiCollapsed(true);
+    }
   }
 
   const fmt = (n: number, d = 2) => n.toFixed(d);
@@ -657,7 +718,7 @@ export default function TradingChart({
             {macdCollapsed ? "▸" : "▾"}
           </button>
         </div>
-        <div ref={macdRef} style={{ width: "100%", height: macdChartH, overflow: "hidden" }} />
+        <div ref={macdRef} style={{ width: "100%", height: macdChartH, overflow: "hidden", display: macdCollapsed ? "none" : undefined }} />
       </div>
 
       {/* ── Drag handle: MACD / Main ── */}
@@ -711,7 +772,7 @@ export default function TradingChart({
             {rsiCollapsed ? "▴" : "▾"}
           </button>
         </div>
-        <div ref={rsiRef} style={{ width: "100%", height: rsiChartH, overflow: "hidden" }} />
+        <div ref={rsiRef} style={{ width: "100%", height: rsiChartH, overflow: "hidden", display: rsiCollapsed ? "none" : undefined }} />
       </div>
 
     </div>
