@@ -89,21 +89,26 @@ const DIV_LABELS: Record<Divergence["type"], string> = {
 };
 
 function detectDivergences(candles: Candle[], rsiVals: (number | null)[]): Divergence[] {
-  const LOOKBACK = 5;
-  const WINDOW   = 150;
-  const MAX      = 5;
+  const LEFT   = 5;  // bars left of pivot needed for confirmation
+  const RIGHT  = 2;  // bars right of pivot needed — asymmetric, keeps pivots recent
+  const WINDOW = 150;
+  const ROLL   = 10; // look-back window for the developing current extreme
 
-  const start = Math.max(0, candles.length - WINDOW - LOOKBACK);
+  const start = Math.max(0, candles.length - WINDOW - LEFT);
   const c = candles.slice(start);
   const r = rsiVals.slice(start);
+  const n = c.length;
 
   const phIdx: number[] = [];
   const plIdx: number[] = [];
 
-  for (let i = LOOKBACK; i < c.length - LOOKBACK; i++) {
+  for (let i = LEFT; i < n - RIGHT; i++) {
     let isHi = true, isLo = true;
-    for (let j = i - LOOKBACK; j <= i + LOOKBACK; j++) {
-      if (j === i) continue;
+    for (let j = i - LEFT; j < i; j++) {
+      if (c[j].high >= c[i].high) isHi = false;
+      if (c[j].low  <= c[i].low)  isLo = false;
+    }
+    for (let j = i + 1; j <= i + RIGHT; j++) {
       if (c[j].high >= c[i].high) isHi = false;
       if (c[j].low  <= c[i].low)  isLo = false;
     }
@@ -113,32 +118,66 @@ function detectDivergences(candles: Candle[], rsiVals: (number | null)[]): Diver
 
   const divs: Divergence[] = [];
 
+  // ── Confirmed historical pivot pairs ─────────────────────────────────────
   for (let k = 1; k < phIdx.length; k++) {
     const i1 = phIdx[k - 1], i2 = phIdx[k];
     const r1 = r[i1], r2 = r[i2];
     if (r1 == null || r2 == null) continue;
-    const priceHH = c[i2].high > c[i1].high;
-    const rsiHH   = r2 > r1;
+    const priceHH = c[i2].high > c[i1].high, rsiHH = r2 > r1;
     if (priceHH && !rsiHH)
-      divs.push({ type: "regular_bearish",  p1: { time: c[i1].time, price: c[i1].high, rsi: r1 }, p2: { time: c[i2].time, price: c[i2].high, rsi: r2 } });
+      divs.push({ type: "regular_bearish", p1: { time: c[i1].time, price: c[i1].high, rsi: r1 }, p2: { time: c[i2].time, price: c[i2].high, rsi: r2 } });
     else if (!priceHH && rsiHH)
-      divs.push({ type: "hidden_bearish",   p1: { time: c[i1].time, price: c[i1].high, rsi: r1 }, p2: { time: c[i2].time, price: c[i2].high, rsi: r2 } });
+      divs.push({ type: "hidden_bearish",  p1: { time: c[i1].time, price: c[i1].high, rsi: r1 }, p2: { time: c[i2].time, price: c[i2].high, rsi: r2 } });
   }
-
   for (let k = 1; k < plIdx.length; k++) {
     const i1 = plIdx[k - 1], i2 = plIdx[k];
     const r1 = r[i1], r2 = r[i2];
     if (r1 == null || r2 == null) continue;
-    const priceLL = c[i2].low < c[i1].low;
-    const rsiLL   = r2 < r1;
+    const priceLL = c[i2].low < c[i1].low, rsiLL = r2 < r1;
     if (priceLL && !rsiLL)
-      divs.push({ type: "regular_bullish",  p1: { time: c[i1].time, price: c[i1].low,  rsi: r1 }, p2: { time: c[i2].time, price: c[i2].low,  rsi: r2 } });
+      divs.push({ type: "regular_bullish", p1: { time: c[i1].time, price: c[i1].low,  rsi: r1 }, p2: { time: c[i2].time, price: c[i2].low,  rsi: r2 } });
     else if (!priceLL && rsiLL)
-      divs.push({ type: "hidden_bullish",   p1: { time: c[i1].time, price: c[i1].low,  rsi: r1 }, p2: { time: c[i2].time, price: c[i2].low,  rsi: r2 } });
+      divs.push({ type: "hidden_bullish",  p1: { time: c[i1].time, price: c[i1].low,  rsi: r1 }, p2: { time: c[i2].time, price: c[i2].low,  rsi: r2 } });
+  }
+
+  // ── Developing: last confirmed pivot vs rolling current extreme ───────────
+  // Always extends to the current candle — shows what's forming right now.
+  const rollStart = Math.max(0, n - ROLL);
+  let curHi = rollStart, curLo = rollStart;
+  for (let i = rollStart + 1; i < n; i++) {
+    if (c[i].high > c[curHi].high) curHi = i;
+    if (c[i].low  < c[curLo].low)  curLo = i;
+  }
+
+  if (phIdx.length > 0) {
+    const lp = phIdx[phIdx.length - 1];
+    if (curHi > lp + RIGHT) {
+      const r1 = r[lp], r2 = r[curHi];
+      if (r1 != null && r2 != null) {
+        const priceHH = c[curHi].high > c[lp].high, rsiHH = r2 > r1;
+        if (priceHH && !rsiHH)
+          divs.push({ type: "regular_bearish", developing: true, p1: { time: c[lp].time, price: c[lp].high, rsi: r1 }, p2: { time: c[curHi].time, price: c[curHi].high, rsi: r2 } });
+        else if (!priceHH && rsiHH)
+          divs.push({ type: "hidden_bearish",  developing: true, p1: { time: c[lp].time, price: c[lp].high, rsi: r1 }, p2: { time: c[curHi].time, price: c[curHi].high, rsi: r2 } });
+      }
+    }
+  }
+  if (plIdx.length > 0) {
+    const lp = plIdx[plIdx.length - 1];
+    if (curLo > lp + RIGHT) {
+      const r1 = r[lp], r2 = r[curLo];
+      if (r1 != null && r2 != null) {
+        const priceLL = c[curLo].low < c[lp].low, rsiLL = r2 < r1;
+        if (priceLL && !rsiLL)
+          divs.push({ type: "regular_bullish", developing: true, p1: { time: c[lp].time, price: c[lp].low,  rsi: r1 }, p2: { time: c[curLo].time, price: c[curLo].low,  rsi: r2 } });
+        else if (!priceLL && rsiLL)
+          divs.push({ type: "hidden_bullish",  developing: true, p1: { time: c[lp].time, price: c[lp].low,  rsi: r1 }, p2: { time: c[curLo].time, price: c[curLo].low,  rsi: r2 } });
+      }
+    }
   }
 
   divs.sort((a, b) => b.p2.time - a.p2.time);
-  return divs.slice(0, 3);
+  return divs.slice(0, 4);
 }
 
 // ── Chart theme ─────────────────────────────────────────────────────────────
@@ -480,16 +519,17 @@ export default function TradingChart({
         cs.setMarkers(markers);
 
         for (const d of divs) {
-          const color = DIV_COLORS[d.type];
-          const lineOpts = { color, lineWidth: 2 as const, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false };
+          const color    = DIV_COLORS[d.type];
+          const style    = d.developing ? LineStyle.Dashed : LineStyle.Solid;
+          const baseOpts = { color, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false, lineStyle: style };
 
           // Price pane — diagonal line connecting the two pivot prices
-          const priceLine = mc2.addLineSeries(lineOpts);
+          const priceLine = mc2.addLineSeries({ ...baseOpts, lineWidth: 2 });
           priceLine.setData([{ time: d.p1.time as never, value: d.p1.price }, { time: d.p2.time as never, value: d.p2.price }]);
           divLinesMain.current.push(priceLine);
 
-          // RSI pane — diagonal line connecting the two RSI values at those same pivots
-          const rsiLine = rc2.addLineSeries(lineOpts);
+          // RSI pane — thicker line so it's visible in the small pane
+          const rsiLine = rc2.addLineSeries({ ...baseOpts, lineWidth: 3 });
           rsiLine.setData([{ time: d.p1.time as never, value: d.p1.rsi }, { time: d.p2.time as never, value: d.p2.rsi }]);
           divLinesRsi.current.push(rsiLine);
         }

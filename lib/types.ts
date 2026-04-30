@@ -5,6 +5,7 @@ export interface Divergence {
   type: "regular_bullish" | "regular_bearish" | "hidden_bullish" | "hidden_bearish";
   p1: { time: number; price: number; rsi: number };
   p2: { time: number; price: number; rsi: number };
+  developing?: boolean;
 }
 
 export type MCPCommand =
