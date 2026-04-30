@@ -270,7 +270,8 @@ export default function TradingChart({
   const [rsiCollapsed,  setRsiCollapsed]  = useState(false);
   const savedMacdH = useRef(110);
   const savedRsiH  = useRef(150);
-  const dragRef = useRef<{ which: "macd" | "rsi"; startY: number; startH: number } | null>(null);
+  const dragRef    = useRef<{ which: "macd" | "rsi"; startY: number; startH: number } | null>(null);
+  const panRef     = useRef<{ x: number; y: number } | null>(null);
   const priceMargins = useRef({ main: { top: 0.05, bottom: 0.05 }, macd: { top: 0.1, bottom: 0.1 }, rsi: { top: 0.08, bottom: 0.08 } });
 
   const updateDrawings = useCallback((d: DrawingRecord[]) => {
@@ -382,9 +383,10 @@ export default function TradingChart({
         e.stopPropagation();
         const c = chart.current;
         if (!c) return;
-        const step = e.deltaY > 0 ? 0.025 : -0.025; // down = zoom out, up = zoom in
-        m.top    = Math.max(0.01, Math.min(0.48, m.top    + step));
-        m.bottom = Math.max(0.01, Math.min(0.48, m.bottom + step));
+        // Multiplicative zoom — each tick is a % change, no artificial hard stop
+        const factor = e.deltaY > 0 ? 1.12 : 0.89;
+        m.top    = Math.max(0.001, Math.min(0.499, m.top    * factor));
+        m.bottom = Math.max(0.001, Math.min(0.499, m.bottom * factor));
         c.priceScale("right").applyOptions({ scaleMargins: { top: m.top, bottom: m.bottom } });
       };
 
@@ -393,6 +395,63 @@ export default function TradingChart({
     }
 
     return () => cleanups.forEach((c) => c());
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Right-click + drag: free 2D pan (horizontal = time scroll, vertical = price shift)
+  useEffect(() => {
+    const inCharts = (t: EventTarget | null) =>
+      [mainRef, macdRef, rsiRef].some((r) => r.current?.contains(t as Node));
+
+    const onDown = (e: MouseEvent) => {
+      if (e.button !== 2 || !inCharts(e.target)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      panRef.current = { x: e.clientX, y: e.clientY };
+      document.body.style.cursor = "grabbing";
+    };
+
+    const onMove = (e: MouseEvent) => {
+      if (!panRef.current) return;
+      const dx = e.clientX - panRef.current.x;
+      const dy = e.clientY - panRef.current.y;
+      panRef.current = { x: e.clientX, y: e.clientY };
+
+      // Horizontal: shift the time axis (syncs to all panes via the existing subscribeVisibleLogicalRangeChange)
+      const chart = mainChart.current;
+      if (chart && dx !== 0) {
+        const pos = chart.timeScale().scrollPosition();
+        chart.timeScale().scrollToPosition(pos - dx * 0.15, false);
+      }
+
+      // Vertical: shift price view via asymmetric scaleMargins on main pane
+      if (chart && dy !== 0 && mainRef.current) {
+        const m = priceMargins.current.main;
+        const step = (dy / mainRef.current.clientHeight) * 0.6;
+        m.top    = Math.max(0.001, Math.min(0.499, m.top    + step));
+        m.bottom = Math.max(0.001, Math.min(0.499, m.bottom - step));
+        chart.priceScale("right").applyOptions({ scaleMargins: { top: m.top, bottom: m.bottom } });
+      }
+    };
+
+    const onUp = (e: MouseEvent) => {
+      if (e.button !== 2) return;
+      panRef.current = null;
+      document.body.style.cursor = "";
+    };
+
+    const noCtx = (e: MouseEvent) => { if (inCharts(e.target)) e.preventDefault(); };
+
+    window.addEventListener("mousedown", onDown, true);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    window.addEventListener("contextmenu", noCtx);
+
+    return () => {
+      window.removeEventListener("mousedown", onDown, true);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("contextmenu", noCtx);
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Init charts ───────────────────────────────────────────────────────────
@@ -404,6 +463,7 @@ export default function TradingChart({
       ...THEME, width: macdRef.current.clientWidth, height: macdRef.current.clientHeight,
       timeScale: { ...THEME.timeScale, visible: false },
       rightPriceScale: { ...THEME.rightPriceScale, scaleMargins: { top: 0.1, bottom: 0.1 } },
+      handleScale: { axisPressedMouseMove: { time: true, price: true } },
     });
     const hist   = mc.addHistogramSeries({ lastValueVisible: true, priceLineVisible: false, priceScaleId: "hist" });
     const macdL  = mc.addLineSeries({ color: "#f77c00", lineWidth: 1, lastValueVisible: true, priceLineVisible: false });
@@ -419,6 +479,7 @@ export default function TradingChart({
       ...THEME, width: mainRef.current.clientWidth, height: mainRef.current.clientHeight,
       timeScale: { ...THEME.timeScale, visible: false },
       rightPriceScale: { ...THEME.rightPriceScale, scaleMargins: { top: 0.05, bottom: 0.05 } },
+      handleScale: { axisPressedMouseMove: { time: true, price: true } },
     });
     const cs = cc.addCandlestickSeries({
       upColor: "#26a69a", downColor: "#ef5350",
@@ -432,6 +493,7 @@ export default function TradingChart({
     const rc = createChart(rsiRef.current, {
       ...THEME, width: rsiRef.current.clientWidth, height: rsiRef.current.clientHeight,
       rightPriceScale: { ...THEME.rightPriceScale, scaleMargins: { top: 0.08, bottom: 0.08 } },
+      handleScale: { axisPressedMouseMove: { time: true, price: true } },
     });
     // Invisible anchors at 0 and 100 — lock the RSI scale so it never auto-fits and shifts the band
     const anchorMin = rc.addLineSeries({ color: "transparent", lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
@@ -477,11 +539,11 @@ export default function TradingChart({
     sync(cc, [mc, rc]);
     sync(rc, [mc, cc]);
 
-    // ── Resize observer ──
+    // ── Resize observer ── (guard against height=0 when pane is display:none)
     const ro = new ResizeObserver(() => {
-      if (macdRef.current) mc.resize(macdRef.current.clientWidth, macdRef.current.clientHeight);
-      if (mainRef.current) cc.resize(mainRef.current.clientWidth, mainRef.current.clientHeight);
-      if (rsiRef.current)  rc.resize(rsiRef.current.clientWidth, rsiRef.current.clientHeight);
+      if (macdRef.current && macdRef.current.clientHeight > 0) mc.resize(macdRef.current.clientWidth, macdRef.current.clientHeight);
+      if (mainRef.current && mainRef.current.clientHeight > 0) cc.resize(mainRef.current.clientWidth, mainRef.current.clientHeight);
+      if (rsiRef.current  && rsiRef.current.clientHeight  > 0) rc.resize(rsiRef.current.clientWidth,  rsiRef.current.clientHeight);
     });
     if (macdRef.current) ro.observe(macdRef.current);
     if (mainRef.current) ro.observe(mainRef.current);
