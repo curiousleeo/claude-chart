@@ -271,7 +271,8 @@ export default function TradingChart({
   const savedMacdH = useRef(110);
   const savedRsiH  = useRef(150);
   const dragRef    = useRef<{ which: "macd" | "rsi"; startY: number; startH: number } | null>(null);
-  const panRef     = useRef<{ x: number; y: number } | null>(null);
+  const panRef              = useRef<{ x: number; y: number } | null>(null);
+  const simulatingScaleRef  = useRef(false);
   const priceMargins = useRef({ main: { top: 0.05, bottom: 0.05 }, macd: { top: 0.1, bottom: 0.1 }, rsi: { top: 0.08, bottom: 0.08 } });
 
   const updateDrawings = useCallback((d: DrawingRecord[]) => {
@@ -359,20 +360,14 @@ export default function TradingChart({
     return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
   }, []);
 
-  // Scroll-wheel zoom on the right price scale
+  // Scroll-wheel zoom on the right price scale.
+  // Simulates a native mousedown→mousemove→mouseup drag so lightweight-charts'
+  // axisPressedMouseMove.price mechanism handles it — truly unlimited Y zoom.
   useEffect(() => {
-    const SCALE_W = 65; // approximate px width of the right price axis
-
-    type Entry = { ref: React.RefObject<HTMLDivElement | null>; chart: React.MutableRefObject<IChartApi | null>; m: { top: number; bottom: number } };
-    const entries: Entry[] = [
-      { ref: macdRef, chart: macdChart, m: priceMargins.current.macd },
-      { ref: mainRef, chart: mainChart, m: priceMargins.current.main },
-      { ref: rsiRef,  chart: rsiChart,  m: priceMargins.current.rsi  },
-    ];
-
+    const SCALE_W = 65;
     const cleanups: Array<() => void> = [];
 
-    for (const { ref, chart, m } of entries) {
+    for (const ref of [macdRef, mainRef, rsiRef]) {
       const el = ref.current;
       if (!el) continue;
 
@@ -381,13 +376,19 @@ export default function TradingChart({
         if (e.clientX < rect.right - SCALE_W) return; // not over price scale
         e.preventDefault();
         e.stopPropagation();
-        const c = chart.current;
-        if (!c) return;
-        // Multiplicative zoom — each tick is a % change, no artificial hard stop
-        const factor = e.deltaY > 0 ? 1.12 : 0.89;
-        m.top    = Math.max(0.001, Math.min(0.499, m.top    * factor));
-        m.bottom = Math.max(0.001, Math.min(0.499, m.bottom * factor));
-        c.priceScale("right").applyOptions({ scaleMargins: { top: m.top, bottom: m.bottom } });
+
+        const target = document.elementFromPoint(e.clientX, e.clientY);
+        if (!target) return;
+
+        // Positive deltaY = scroll down = zoom out (drag price scale down)
+        const dy = e.deltaY > 0 ? 30 : -30;
+        const cx = e.clientX, cy = e.clientY;
+
+        simulatingScaleRef.current = true;
+        target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, clientX: cx, clientY: cy,      button: 0, buttons: 1 }));
+        target.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, cancelable: true, clientX: cx, clientY: cy + dy, button: 0, buttons: 1 }));
+        target.dispatchEvent(new MouseEvent("mouseup",   { bubbles: true, cancelable: true, clientX: cx, clientY: cy + dy, button: 0 }));
+        simulatingScaleRef.current = false;
       };
 
       el.addEventListener("wheel", fn, { capture: true, passive: false });
@@ -403,9 +404,10 @@ export default function TradingChart({
       [mainRef, macdRef, rsiRef].some((r) => r.current?.contains(t as Node));
 
     const onDown = (e: MouseEvent) => {
+      if (simulatingScaleRef.current) return; // ignore synthetic events from price-scale wheel zoom
       if (e.button !== 0 || !inCharts(e.target)) return;
       e.preventDefault();
-      e.stopPropagation(); // prevent chart's own left-drag from firing
+      e.stopPropagation();
       panRef.current = { x: e.clientX, y: e.clientY };
       document.body.style.cursor = "grabbing";
     };
@@ -457,7 +459,7 @@ export default function TradingChart({
       ...THEME, width: macdRef.current.clientWidth, height: macdRef.current.clientHeight,
       timeScale: { ...THEME.timeScale, visible: false },
       rightPriceScale: { ...THEME.rightPriceScale, scaleMargins: { top: 0.1, bottom: 0.1 } },
-      handleScale: { mouseWheel: false, axisPressedMouseMove: { time: true, price: true } },
+      handleScale: { axisPressedMouseMove: { time: true, price: true } },
       handleScroll: { pressedMouseMove: false },
     });
     const hist   = mc.addHistogramSeries({ lastValueVisible: true, priceLineVisible: false, priceScaleId: "hist" });
@@ -474,7 +476,7 @@ export default function TradingChart({
       ...THEME, width: mainRef.current.clientWidth, height: mainRef.current.clientHeight,
       timeScale: { ...THEME.timeScale, visible: false },
       rightPriceScale: { ...THEME.rightPriceScale, scaleMargins: { top: 0.05, bottom: 0.05 } },
-      handleScale: { mouseWheel: false, axisPressedMouseMove: { time: true, price: true } },
+      handleScale: { axisPressedMouseMove: { time: true, price: true } },
       handleScroll: { pressedMouseMove: false },
     });
     const cs = cc.addCandlestickSeries({
@@ -489,7 +491,7 @@ export default function TradingChart({
     const rc = createChart(rsiRef.current, {
       ...THEME, width: rsiRef.current.clientWidth, height: rsiRef.current.clientHeight,
       rightPriceScale: { ...THEME.rightPriceScale, scaleMargins: { top: 0.08, bottom: 0.08 } },
-      handleScale: { mouseWheel: false, axisPressedMouseMove: { time: true, price: true } },
+      handleScale: { axisPressedMouseMove: { time: true, price: true } },
       handleScroll: { pressedMouseMove: false },
     });
     // Invisible anchors at 0 and 100 — lock the RSI scale so it never auto-fits and shifts the band
@@ -672,36 +674,9 @@ export default function TradingChart({
     return () => unsub?.();
   }, [symbol, timeframe, onPriceChange, onDivergencesChange]);
 
-  function toggleMacd() {
-    if (macdCollapsed) {
-      const h = savedMacdH.current;
-      setMacdCollapsed(false);
-      setMacdChartH(h);
-      requestAnimationFrame(() => {
-        if (macdChart.current && macdRef.current)
-          macdChart.current.resize(macdRef.current.clientWidth, h);
-      });
-    } else {
-      savedMacdH.current = macdChartH;
-      setMacdCollapsed(true);
-      setMacdChartH(0); // div collapses to 0; ResizeObserver guard skips resize(w,0)
-    }
-  }
-  function toggleRsi() {
-    if (rsiCollapsed) {
-      const h = savedRsiH.current;
-      setRsiCollapsed(false);
-      setRsiChartH(h);
-      requestAnimationFrame(() => {
-        if (rsiChart.current && rsiRef.current)
-          rsiChart.current.resize(rsiRef.current.clientWidth, h);
-      });
-    } else {
-      savedRsiH.current = rsiChartH;
-      setRsiCollapsed(true);
-      setRsiChartH(0);
-    }
-  }
+  // Collapse by clipping the wrapper — chart div height never changes so no resize needed
+  function toggleMacd() { setMacdCollapsed((v) => !v); }
+  function toggleRsi()  { setRsiCollapsed((v) => !v); }
 
   const fmt = (n: number, d = 2) => n.toFixed(d);
   const fmtPrice = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -761,8 +736,8 @@ export default function TradingChart({
         </div>
       </div>
 
-      {/* ── MACD pane ── */}
-      <div style={{ flexShrink: 0 }}>
+      {/* ── MACD pane — wrapper clips chart; chart div height never changes ── */}
+      <div style={{ flexShrink: 0, overflow: "hidden", height: macdCollapsed ? 26 : 26 + macdChartH }}>
         <div style={{ height: 26, display: "flex", alignItems: "center", gap: 6, padding: "0 8px", borderTop: `1px solid ${BORDER}` }}>
           <span style={{ color: "#d1d4dc", fontSize: 11 }}>MACD</span>
           {!macdCollapsed && <>
@@ -776,7 +751,7 @@ export default function TradingChart({
             {macdCollapsed ? "▸" : "▾"}
           </button>
         </div>
-        <div ref={macdRef} style={{ width: "100%", height: macdChartH, overflow: "hidden" }} />
+        <div ref={macdRef} style={{ width: "100%", height: macdChartH }} />
       </div>
 
       {/* ── Drag handle: MACD / Main ── */}
@@ -812,8 +787,8 @@ export default function TradingChart({
         <div style={{ width: 28, height: 2, borderRadius: 1, background: "#4a4f5e" }} />
       </div>
 
-      {/* ── RSI pane ── */}
-      <div style={{ flexShrink: 0 }}>
+      {/* ── RSI pane — wrapper clips chart; chart div height never changes ── */}
+      <div style={{ flexShrink: 0, overflow: "hidden", height: rsiCollapsed ? 26 : 26 + rsiChartH }}>
         <div style={{ height: 26, display: "flex", alignItems: "center", gap: 6, padding: "0 8px" }}>
           <span style={{ color: "#d1d4dc", fontSize: 11 }}>RSI</span>
           {!rsiCollapsed && <>
@@ -830,7 +805,7 @@ export default function TradingChart({
             {rsiCollapsed ? "▴" : "▾"}
           </button>
         </div>
-        <div ref={rsiRef} style={{ width: "100%", height: rsiChartH, overflow: "hidden" }} />
+        <div ref={rsiRef} style={{ width: "100%", height: rsiChartH }} />
       </div>
 
     </div>
