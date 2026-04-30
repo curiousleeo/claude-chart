@@ -397,15 +397,15 @@ export default function TradingChart({
     return () => cleanups.forEach((c) => c());
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Right-click + drag: free 2D pan (horizontal = time scroll, vertical = price shift)
+  // Left-click + drag: free 2D pan (horizontal = time scroll, vertical = price shift)
   useEffect(() => {
     const inCharts = (t: EventTarget | null) =>
       [mainRef, macdRef, rsiRef].some((r) => r.current?.contains(t as Node));
 
     const onDown = (e: MouseEvent) => {
-      if (e.button !== 2 || !inCharts(e.target)) return;
+      if (e.button !== 0 || !inCharts(e.target)) return;
       e.preventDefault();
-      e.stopPropagation();
+      e.stopPropagation(); // prevent chart's own left-drag from firing
       panRef.current = { x: e.clientX, y: e.clientY };
       document.body.style.cursor = "grabbing";
     };
@@ -416,14 +416,12 @@ export default function TradingChart({
       const dy = e.clientY - panRef.current.y;
       panRef.current = { x: e.clientX, y: e.clientY };
 
-      // Horizontal: shift the time axis (syncs to all panes via the existing subscribeVisibleLogicalRangeChange)
       const chart = mainChart.current;
       if (chart && dx !== 0) {
         const pos = chart.timeScale().scrollPosition();
         chart.timeScale().scrollToPosition(pos - dx * 0.15, false);
       }
 
-      // Vertical: shift price view via asymmetric scaleMargins on main pane
       if (chart && dy !== 0 && mainRef.current) {
         const m = priceMargins.current.main;
         const step = (dy / mainRef.current.clientHeight) * 0.6;
@@ -434,23 +432,19 @@ export default function TradingChart({
     };
 
     const onUp = (e: MouseEvent) => {
-      if (e.button !== 2) return;
+      if (e.button !== 0) return;
       panRef.current = null;
       document.body.style.cursor = "";
     };
 
-    const noCtx = (e: MouseEvent) => { if (inCharts(e.target)) e.preventDefault(); };
-
     window.addEventListener("mousedown", onDown, true);
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
-    window.addEventListener("contextmenu", noCtx);
 
     return () => {
       window.removeEventListener("mousedown", onDown, true);
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
-      window.removeEventListener("contextmenu", noCtx);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -463,7 +457,8 @@ export default function TradingChart({
       ...THEME, width: macdRef.current.clientWidth, height: macdRef.current.clientHeight,
       timeScale: { ...THEME.timeScale, visible: false },
       rightPriceScale: { ...THEME.rightPriceScale, scaleMargins: { top: 0.1, bottom: 0.1 } },
-      handleScale: { axisPressedMouseMove: { time: true, price: true } },
+      handleScale: { mouseWheel: false, axisPressedMouseMove: { time: true, price: true } },
+      handleScroll: { pressedMouseMove: false },
     });
     const hist   = mc.addHistogramSeries({ lastValueVisible: true, priceLineVisible: false, priceScaleId: "hist" });
     const macdL  = mc.addLineSeries({ color: "#f77c00", lineWidth: 1, lastValueVisible: true, priceLineVisible: false });
@@ -479,7 +474,8 @@ export default function TradingChart({
       ...THEME, width: mainRef.current.clientWidth, height: mainRef.current.clientHeight,
       timeScale: { ...THEME.timeScale, visible: false },
       rightPriceScale: { ...THEME.rightPriceScale, scaleMargins: { top: 0.05, bottom: 0.05 } },
-      handleScale: { axisPressedMouseMove: { time: true, price: true } },
+      handleScale: { mouseWheel: false, axisPressedMouseMove: { time: true, price: true } },
+      handleScroll: { pressedMouseMove: false },
     });
     const cs = cc.addCandlestickSeries({
       upColor: "#26a69a", downColor: "#ef5350",
@@ -493,7 +489,8 @@ export default function TradingChart({
     const rc = createChart(rsiRef.current, {
       ...THEME, width: rsiRef.current.clientWidth, height: rsiRef.current.clientHeight,
       rightPriceScale: { ...THEME.rightPriceScale, scaleMargins: { top: 0.08, bottom: 0.08 } },
-      handleScale: { axisPressedMouseMove: { time: true, price: true } },
+      handleScale: { mouseWheel: false, axisPressedMouseMove: { time: true, price: true } },
+      handleScroll: { pressedMouseMove: false },
     });
     // Invisible anchors at 0 and 100 — lock the RSI scale so it never auto-fits and shifts the band
     const anchorMin = rc.addLineSeries({ color: "transparent", lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
@@ -680,7 +677,6 @@ export default function TradingChart({
       const h = savedMacdH.current;
       setMacdCollapsed(false);
       setMacdChartH(h);
-      // Chart was hidden via display:none — now resize it to match the restored div height
       requestAnimationFrame(() => {
         if (macdChart.current && macdRef.current)
           macdChart.current.resize(macdRef.current.clientWidth, h);
@@ -688,8 +684,7 @@ export default function TradingChart({
     } else {
       savedMacdH.current = macdChartH;
       setMacdCollapsed(true);
-      // Don't resize chart to 0 — lightweight-charts doesn't handle height=0
-      // The div gets display:none so the chart is hidden without touching its internals
+      setMacdChartH(0); // div collapses to 0; ResizeObserver guard skips resize(w,0)
     }
   }
   function toggleRsi() {
@@ -704,6 +699,7 @@ export default function TradingChart({
     } else {
       savedRsiH.current = rsiChartH;
       setRsiCollapsed(true);
+      setRsiChartH(0);
     }
   }
 
@@ -780,7 +776,7 @@ export default function TradingChart({
             {macdCollapsed ? "▸" : "▾"}
           </button>
         </div>
-        <div ref={macdRef} style={{ width: "100%", height: macdChartH, overflow: "hidden", display: macdCollapsed ? "none" : undefined }} />
+        <div ref={macdRef} style={{ width: "100%", height: macdChartH, overflow: "hidden" }} />
       </div>
 
       {/* ── Drag handle: MACD / Main ── */}
@@ -834,7 +830,7 @@ export default function TradingChart({
             {rsiCollapsed ? "▴" : "▾"}
           </button>
         </div>
-        <div ref={rsiRef} style={{ width: "100%", height: rsiChartH, overflow: "hidden", display: rsiCollapsed ? "none" : undefined }} />
+        <div ref={rsiRef} style={{ width: "100%", height: rsiChartH, overflow: "hidden" }} />
       </div>
 
     </div>
