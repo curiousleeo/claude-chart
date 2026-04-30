@@ -263,6 +263,15 @@ export default function TradingChart({
   const [tfOpen,    setTfOpen]     = useState(false);
   const tfRef = useRef<HTMLDivElement>(null);
 
+  // Pane resize / collapse
+  const [macdChartH, setMacdChartH] = useState(110);
+  const [rsiChartH,  setRsiChartH]  = useState(150);
+  const [macdCollapsed, setMacdCollapsed] = useState(false);
+  const [rsiCollapsed,  setRsiCollapsed]  = useState(false);
+  const savedMacdH = useRef(110);
+  const savedRsiH  = useRef(150);
+  const dragRef = useRef<{ which: "macd" | "rsi"; startY: number; startH: number } | null>(null);
+
   const updateDrawings = useCallback((d: DrawingRecord[]) => {
     drawingsRef.current = d;
     onDrawingsChange([...d]);
@@ -329,6 +338,23 @@ export default function TradingChart({
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  // Drag-to-resize pane boundaries
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      if (!dragRef.current) return;
+      const delta = e.clientY - dragRef.current.startY;
+      if (dragRef.current.which === "macd") {
+        setMacdChartH(Math.max(40, Math.min(600, dragRef.current.startH + delta)));
+      } else {
+        setRsiChartH(Math.max(40, Math.min(600, dragRef.current.startH - delta)));
+      }
+    }
+    function onUp() { dragRef.current = null; }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
   }, []);
 
   // ── Init charts ───────────────────────────────────────────────────────────
@@ -549,6 +575,15 @@ export default function TradingChart({
     return () => unsub?.();
   }, [symbol, timeframe, onPriceChange, onDivergencesChange]);
 
+  function toggleMacd() {
+    if (macdCollapsed) { setMacdCollapsed(false); setMacdChartH(savedMacdH.current); }
+    else { savedMacdH.current = macdChartH; setMacdCollapsed(true); setMacdChartH(0); }
+  }
+  function toggleRsi() {
+    if (rsiCollapsed) { setRsiCollapsed(false); setRsiChartH(savedRsiH.current); }
+    else { savedRsiH.current = rsiChartH; setRsiCollapsed(true); setRsiChartH(0); }
+  }
+
   const fmt = (n: number, d = 2) => n.toFixed(d);
   const fmtPrice = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -608,32 +643,39 @@ export default function TradingChart({
       </div>
 
       {/* ── MACD pane ── */}
-      <div className="relative" style={{ height: "20%" }}>
-        <div className="absolute top-1 left-2 z-10 flex items-center gap-1 text-[11px]" style={{ color: "#787b86" }}>
-          <span style={{ color: "#d1d4dc" }}>MACD</span>
-          <span>close 12 26 9</span>
-          <span style={{ color: "#f77c00" }}>{fmt(macdLabel.macd)}</span>
-          <span style={{ color: "#2962ff" }}>{fmt(macdLabel.signal)}</span>
-          <span style={{ color: macdLabel.hist >= 0 ? "#26a69a" : "#ef5350" }}>{fmt(macdLabel.hist)}</span>
+      <div style={{ flexShrink: 0 }}>
+        <div style={{ height: 26, display: "flex", alignItems: "center", gap: 6, padding: "0 8px", borderTop: `1px solid ${BORDER}` }}>
+          <span style={{ color: "#d1d4dc", fontSize: 11 }}>MACD</span>
+          {!macdCollapsed && <>
+            <span style={{ color: "#787b86", fontSize: 11 }}>close 12 26 9</span>
+            <span style={{ color: "#f77c00", fontSize: 11 }}>{fmt(macdLabel.macd)}</span>
+            <span style={{ color: "#2962ff", fontSize: 11 }}>{fmt(macdLabel.signal)}</span>
+            <span style={{ color: macdLabel.hist >= 0 ? "#26a69a" : "#ef5350", fontSize: 11 }}>{fmt(macdLabel.hist)}</span>
+          </>}
+          <button onClick={toggleMacd} title={macdCollapsed ? "Show" : "Hide"}
+            style={{ marginLeft: "auto", color: "#4a4f5e", fontSize: 15, lineHeight: 1, cursor: "pointer", userSelect: "none" }}>
+            {macdCollapsed ? "▸" : "▾"}
+          </button>
         </div>
-        <div ref={macdRef} style={{ width: "100%", height: "100%" }} />
+        <div ref={macdRef} style={{ width: "100%", height: macdChartH, overflow: "hidden" }} />
+      </div>
+
+      {/* ── Drag handle: MACD / Main ── */}
+      <div
+        onMouseDown={(e) => { e.preventDefault(); dragRef.current = { which: "macd", startY: e.clientY, startH: macdChartH }; }}
+        style={{ height: 5, flexShrink: 0, cursor: "row-resize", background: BORDER, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ width: 28, height: 2, borderRadius: 1, background: "#4a4f5e" }} />
       </div>
 
       {/* ── Main candle pane ── */}
-      <div className="relative" style={{ height: "55%", borderTop: `1px solid ${BORDER}` }}>
+      <div className="relative" style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
         <div className="absolute top-1 left-2 z-10 flex flex-wrap items-center gap-x-1.5 gap-y-0 text-[11px]" style={{ color: "#787b86" }}>
-          {/* live dot */}
           <div className="w-1.5 h-1.5 rounded-full" style={{ background: "#26a69a", boxShadow: "0 0 4px #26a69a" }} />
           <span style={{ color: "#d1d4dc", fontWeight: 600 }}>
             {symbol === "BTC-USD" ? "Bitcoin / U.S. Dollar" : "Solana / U.S. Dollar"}
           </span>
-          <span>·</span>
-          <span>{timeframe}</span>
-          <span>·</span>
-          <span>Coinbase</span>
-          <span className="ml-1">
-            O <span style={{ color: "#d1d4dc" }}>{fmtPrice(ohlc.o)}</span>
-          </span>
+          <span>·</span><span>{timeframe}</span><span>·</span><span>Coinbase</span>
+          <span className="ml-1">O <span style={{ color: "#d1d4dc" }}>{fmtPrice(ohlc.o)}</span></span>
           <span>H <span style={{ color: "#26a69a" }}>{fmtPrice(ohlc.h)}</span></span>
           <span>L <span style={{ color: "#ef5350" }}>{fmtPrice(ohlc.l)}</span></span>
           <span>C <span style={{ color: "#d1d4dc" }}>{fmtPrice(ohlc.c)}</span></span>
@@ -644,19 +686,32 @@ export default function TradingChart({
         <div ref={mainRef} style={{ width: "100%", height: "100%" }} />
       </div>
 
+      {/* ── Drag handle: Main / RSI ── */}
+      <div
+        onMouseDown={(e) => { e.preventDefault(); dragRef.current = { which: "rsi", startY: e.clientY, startH: rsiChartH }; }}
+        style={{ height: 5, flexShrink: 0, cursor: "row-resize", background: BORDER, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ width: 28, height: 2, borderRadius: 1, background: "#4a4f5e" }} />
+      </div>
+
       {/* ── RSI pane ── */}
-      <div className="relative" style={{ height: "25%", borderTop: `1px solid ${BORDER}` }}>
-        <div className="absolute top-1 left-2 z-10 flex items-center gap-1 text-[11px]" style={{ color: "#787b86" }}>
-          <span style={{ color: "#d1d4dc" }}>RSI</span>
-          <span>14 close</span>
-          <span style={{ color: "#9575cd" }}>{fmt(rsiLabel.rsi)}</span>
-          <span style={{ color: "#f59e0b" }}>{fmt(rsiLabel.ma)}</span>
-          {divTypes.some((t) => t === "regular_bullish") && <span style={{ color: "#26a69a", fontWeight: 600 }}>bull div</span>}
-          {divTypes.some((t) => t === "regular_bearish") && <span style={{ color: "#ef5350", fontWeight: 600 }}>bear div</span>}
-          {divTypes.some((t) => t === "hidden_bullish")  && <span style={{ color: "rgba(38,166,154,0.8)" }}>hbull</span>}
-          {divTypes.some((t) => t === "hidden_bearish")  && <span style={{ color: "rgba(239,83,80,0.8)" }}>hbear</span>}
+      <div style={{ flexShrink: 0 }}>
+        <div style={{ height: 26, display: "flex", alignItems: "center", gap: 6, padding: "0 8px" }}>
+          <span style={{ color: "#d1d4dc", fontSize: 11 }}>RSI</span>
+          {!rsiCollapsed && <>
+            <span style={{ color: "#787b86", fontSize: 11 }}>14 close</span>
+            <span style={{ color: "#9575cd", fontSize: 11 }}>{fmt(rsiLabel.rsi)}</span>
+            <span style={{ color: "#f59e0b", fontSize: 11 }}>{fmt(rsiLabel.ma)}</span>
+            {divTypes.some((t) => t === "regular_bullish") && <span style={{ color: "#26a69a", fontWeight: 600, fontSize: 11 }}>bull div</span>}
+            {divTypes.some((t) => t === "regular_bearish") && <span style={{ color: "#ef5350", fontWeight: 600, fontSize: 11 }}>bear div</span>}
+            {divTypes.some((t) => t === "hidden_bullish")  && <span style={{ color: "rgba(38,166,154,0.8)", fontSize: 11 }}>hbull</span>}
+            {divTypes.some((t) => t === "hidden_bearish")  && <span style={{ color: "rgba(239,83,80,0.8)", fontSize: 11 }}>hbear</span>}
+          </>}
+          <button onClick={toggleRsi} title={rsiCollapsed ? "Show" : "Hide"}
+            style={{ marginLeft: "auto", color: "#4a4f5e", fontSize: 15, lineHeight: 1, cursor: "pointer", userSelect: "none" }}>
+            {rsiCollapsed ? "▴" : "▾"}
+          </button>
         </div>
-        <div ref={rsiRef} style={{ width: "100%", height: "100%" }} />
+        <div ref={rsiRef} style={{ width: "100%", height: rsiChartH, overflow: "hidden" }} />
       </div>
 
     </div>
