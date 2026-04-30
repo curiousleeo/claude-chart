@@ -241,10 +241,6 @@ export default function TradingChart({
   const histSeries    = useRef<ReturnType<IChartApi["addHistogramSeries"]> | null>(null);
   const rsiSeries     = useRef<ReturnType<IChartApi["addLineSeries"]> | null>(null);
   const rsiMaSeries   = useRef<ReturnType<IChartApi["addLineSeries"]> | null>(null);
-  const rsiBandUpper  = useRef<ReturnType<IChartApi["addAreaSeries"]> | null>(null);
-  const rsiBandMask   = useRef<ReturnType<IChartApi["addAreaSeries"]> | null>(null);
-  const rsiAnchorMin  = useRef<ReturnType<IChartApi["addLineSeries"]> | null>(null);
-  const rsiAnchorMax  = useRef<ReturnType<IChartApi["addLineSeries"]> | null>(null);
 
   // Drawings
   const drawingsRef   = useRef<DrawingRecord[]>([]);
@@ -264,12 +260,12 @@ export default function TradingChart({
   const tfRef = useRef<HTMLDivElement>(null);
 
   // Pane resize / collapse
-  const [macdChartH, setMacdChartH] = useState(110);
-  const [rsiChartH,  setRsiChartH]  = useState(150);
+  const [macdChartH, setMacdChartH] = useState(80);
+  const [rsiChartH,  setRsiChartH]  = useState(100);
   const [macdCollapsed, setMacdCollapsed] = useState(false);
   const [rsiCollapsed,  setRsiCollapsed]  = useState(false);
-  const savedMacdH = useRef(110);
-  const savedRsiH  = useRef(150);
+  const savedMacdH = useRef(80);
+  const savedRsiH  = useRef(100);
   const dragRef    = useRef<{ which: "macd" | "rsi"; startY: number; startH: number } | null>(null);
   const panRef              = useRef<{ x: number; y: number } | null>(null);
   const simulatingScaleRef  = useRef(false);
@@ -478,6 +474,7 @@ export default function TradingChart({
       rightPriceScale: { ...THEME.rightPriceScale, scaleMargins: { top: 0.05, bottom: 0.05 } },
       handleScale: { axisPressedMouseMove: { time: true, price: true } },
       handleScroll: { pressedMouseMove: false },
+      localization: { priceFormatter: (p: number) => p.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
     });
     const cs = cc.addCandlestickSeries({
       upColor: "#26a69a", downColor: "#ef5350",
@@ -494,24 +491,7 @@ export default function TradingChart({
       handleScale: { axisPressedMouseMove: { time: true, price: true } },
       handleScroll: { pressedMouseMove: false },
     });
-    // Invisible anchors at 0 and 100 — lock the RSI scale so it never auto-fits and shifts the band
-    const anchorMin = rc.addLineSeries({ color: "transparent", lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
-    const anchorMax = rc.addLineSeries({ color: "transparent", lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
-    rsiAnchorMin.current = anchorMin;
-    rsiAnchorMax.current = anchorMax;
-
-    // Band fill: upper area (0→70, light purple) + mask (0→30, dark bg) = shaded 30–70 zone
-    const bandUpper = rc.addAreaSeries({
-      lineColor: "transparent", lineWidth: 1,
-      topColor: "rgba(149,117,205,0.15)", bottomColor: "rgba(149,117,205,0.15)",
-      lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
-    });
-    const bandMask = rc.addAreaSeries({
-      lineColor: "transparent", lineWidth: 1,
-      topColor: BG, bottomColor: BG,
-      lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
-    });
-    // RSI lines on top of band
+    // RSI lines
     const rsiL  = rc.addLineSeries({ color: "#7b1fa2", lineWidth: 1, lastValueVisible: true, priceLineVisible: false });
     const rsiMa = rc.addLineSeries({ color: "#f59e0b", lineWidth: 1, lastValueVisible: true, priceLineVisible: false });
     // Dashed reference lines at 70, 50, 30 — like TradingView
@@ -519,8 +499,6 @@ export default function TradingChart({
     rsiL.createPriceLine({ price: 50, color: "rgba(120,123,134,0.35)", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: "" });
     rsiL.createPriceLine({ price: 30, color: "rgba(149,117,205,0.5)", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: "" });
     rsiChart.current    = rc;
-    rsiBandUpper.current = bandUpper;
-    rsiBandMask.current  = bandMask;
     rsiSeries.current   = rsiL;
     rsiMaSeries.current = rsiMa;
 
@@ -554,8 +532,6 @@ export default function TradingChart({
       macdChart.current = mainChart.current = rsiChart.current = null;
       candleSeries.current = macdSeries.current = signalSeries.current = null;
       histSeries.current = rsiSeries.current = rsiMaSeries.current = null;
-      rsiBandUpper.current = rsiBandMask.current = null;
-      rsiAnchorMin.current = rsiAnchorMax.current = null;
       divLinesRsi.current = [];
       divLinesMain.current = [];
     };
@@ -569,11 +545,7 @@ export default function TradingChart({
     const sl  = signalSeries.current;
     const rl  = rsiSeries.current;
     const rm  = rsiMaSeries.current;
-    const bu  = rsiBandUpper.current;
-    const bm  = rsiBandMask.current;
-    const amin = rsiAnchorMin.current;
-    const amax = rsiAnchorMax.current;
-    if (!cs || !hs || !ml || !sl || !rl || !rm || !bu || !bm || !amin || !amax) return;
+    if (!cs || !hs || !ml || !sl || !rl || !rm) return;
 
     // Clear previous divergence overlays before fetching new data
     divLinesRsi.current.forEach((l) => rsiChart.current?.removeSeries(l));
@@ -602,15 +574,6 @@ export default function TradingChart({
       // RSI
       const rsiVals = rsi(closes);
       const rsiMaVals = sma(rsiVals, 14);
-      // Extend band 200 bars into the future at the same interval so it always fills the right side
-      const interval = candles[candles.length - 1].time - candles[candles.length - 2].time;
-      const lastTime = candles[candles.length - 1].time;
-      const futureTimes = Array.from({ length: 200 }, (_, i) => lastTime + (i + 1) * interval);
-      const bandTimes = [...candles.map((c) => c.time), ...futureTimes];
-      amin.setData(bandTimes.map((t) => ({ time: t as never, value: 0 })));
-      amax.setData(bandTimes.map((t) => ({ time: t as never, value: 100 })));
-      bu.setData(bandTimes.map((t) => ({ time: t as never, value: 70 })));
-      bm.setData(bandTimes.map((t) => ({ time: t as never, value: 30 })));
       rl.setData(candles.map((c, i) => rsiVals[i] != null ? { time: c.time as never, value: rsiVals[i]! } : null).filter(Boolean) as never);
       rm.setData(candles.map((c, i) => rsiMaVals[i] != null ? { time: c.time as never, value: rsiMaVals[i]! } : null).filter(Boolean) as never);
 
