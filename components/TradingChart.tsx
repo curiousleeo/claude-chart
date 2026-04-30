@@ -196,7 +196,7 @@ const THEME = {
     vertLine: { color: "#758696", labelBackgroundColor: "#2a2e39" },
     horzLine: { color: "#758696", labelBackgroundColor: "#2a2e39" },
   },
-  rightPriceScale: { borderColor: BORDER },
+  rightPriceScale: { borderColor: BORDER, minimumWidth: 90 },
   timeScale: { borderColor: BORDER, timeVisible: true, secondsVisible: false },
 };
 
