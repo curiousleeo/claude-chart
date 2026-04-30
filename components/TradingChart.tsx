@@ -738,7 +738,9 @@ export default function TradingChart({
 
       {/* ── MACD pane — wrapper clips chart; chart div height never changes ── */}
       <div style={{ flexShrink: 0, overflow: "hidden", height: macdCollapsed ? 26 : 26 + macdChartH }}>
-        <div style={{ height: 26, display: "flex", alignItems: "center", gap: 6, padding: "0 8px", borderTop: `1px solid ${BORDER}` }}>
+        <div onClick={toggleMacd}
+          style={{ height: 26, display: "flex", alignItems: "center", gap: 6, padding: "0 8px", borderTop: `1px solid ${BORDER}`, cursor: "pointer", userSelect: "none" }}>
+          <span style={{ color: "#9598a1", fontSize: 10 }}>{macdCollapsed ? "▶" : "▼"}</span>
           <span style={{ color: "#d1d4dc", fontSize: 11 }}>MACD</span>
           {!macdCollapsed && <>
             <span style={{ color: "#787b86", fontSize: 11 }}>close 12 26 9</span>
@@ -746,10 +748,6 @@ export default function TradingChart({
             <span style={{ color: "#2962ff", fontSize: 11 }}>{fmt(macdLabel.signal)}</span>
             <span style={{ color: macdLabel.hist >= 0 ? "#26a69a" : "#ef5350", fontSize: 11 }}>{fmt(macdLabel.hist)}</span>
           </>}
-          <button onClick={toggleMacd} title={macdCollapsed ? "Show" : "Hide"}
-            style={{ marginLeft: "auto", color: "#4a4f5e", fontSize: 15, lineHeight: 1, cursor: "pointer", userSelect: "none" }}>
-            {macdCollapsed ? "▸" : "▾"}
-          </button>
         </div>
         <div ref={macdRef} style={{ width: "100%", height: macdChartH }} />
       </div>
@@ -789,7 +787,9 @@ export default function TradingChart({
 
       {/* ── RSI pane — wrapper clips chart; chart div height never changes ── */}
       <div style={{ flexShrink: 0, overflow: "hidden", height: rsiCollapsed ? 26 : 26 + rsiChartH }}>
-        <div style={{ height: 26, display: "flex", alignItems: "center", gap: 6, padding: "0 8px" }}>
+        <div onClick={toggleRsi}
+          style={{ height: 26, display: "flex", alignItems: "center", gap: 6, padding: "0 8px", cursor: "pointer", userSelect: "none" }}>
+          <span style={{ color: "#9598a1", fontSize: 10 }}>{rsiCollapsed ? "▶" : "▼"}</span>
           <span style={{ color: "#d1d4dc", fontSize: 11 }}>RSI</span>
           {!rsiCollapsed && <>
             <span style={{ color: "#787b86", fontSize: 11 }}>14 close</span>
@@ -800,10 +800,6 @@ export default function TradingChart({
             {divTypes.some((t) => t === "hidden_bullish")  && <span style={{ color: "rgba(38,166,154,0.8)", fontSize: 11 }}>hbull</span>}
             {divTypes.some((t) => t === "hidden_bearish")  && <span style={{ color: "rgba(239,83,80,0.8)", fontSize: 11 }}>hbear</span>}
           </>}
-          <button onClick={toggleRsi} title={rsiCollapsed ? "Show" : "Hide"}
-            style={{ marginLeft: "auto", color: "#4a4f5e", fontSize: 15, lineHeight: 1, cursor: "pointer", userSelect: "none" }}>
-            {rsiCollapsed ? "▴" : "▾"}
-          </button>
         </div>
         <div ref={rsiRef} style={{ width: "100%", height: rsiChartH }} />
       </div>
