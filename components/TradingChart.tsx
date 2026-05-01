@@ -251,6 +251,9 @@ export default function TradingChart({
   const divLinesRsi  = useRef<ISeriesApi<"Line">[]>([]);
   const divLinesMain = useRef<ISeriesApi<"Line">[]>([]);
 
+  // Called after data loads to sync all three price scale widths → pixel-perfect alignment
+  const syncScaleWidthsRef = useRef<(() => void) | null>(null);
+
   // Indicator labels
   const [macdLabel, setMacdLabel]  = useState({ macd: 0, signal: 0, hist: 0 });
   const [rsiLabel,  setRsiLabel]   = useState({ rsi: 0, ma: 0 });
@@ -516,17 +519,33 @@ export default function TradingChart({
     sync(cc, [mc, rc]);
     sync(rc, [mc, cc]);
 
+    // ── Price scale width sync ── read actual rendered widths and force all to max
+    // so all three canvas areas are the same pixel width → bars align perfectly
+    const syncScaleWidths = () => {
+      const widths = [mc, cc, rc].map(c => c.priceScale('right').width());
+      const maxW = Math.max(...widths);
+      if (maxW > 0) [mc, cc, rc].forEach(c => c.applyOptions({ rightPriceScale: { minimumWidth: maxW } }));
+    };
+
     // ── Resize observer ── (guard against height=0 when pane is display:none)
+    let syncTimer: ReturnType<typeof setTimeout> | null = null;
     const ro = new ResizeObserver(() => {
       if (macdRef.current && macdRef.current.clientHeight > 0) mc.resize(macdRef.current.clientWidth, macdRef.current.clientHeight);
       if (mainRef.current && mainRef.current.clientHeight > 0) cc.resize(mainRef.current.clientWidth, mainRef.current.clientHeight);
       if (rsiRef.current  && rsiRef.current.clientHeight  > 0) rc.resize(rsiRef.current.clientWidth,  rsiRef.current.clientHeight);
+      if (syncTimer) clearTimeout(syncTimer);
+      syncTimer = setTimeout(syncScaleWidths, 50);
     });
     if (macdRef.current) ro.observe(macdRef.current);
     if (mainRef.current) ro.observe(mainRef.current);
     if (rsiRef.current)  ro.observe(rsiRef.current);
 
+    // Expose syncScaleWidths so the data-load effect can call it after prices are set
+    syncScaleWidthsRef.current = syncScaleWidths;
+
     return () => {
+      if (syncTimer) clearTimeout(syncTimer);
+      syncScaleWidthsRef.current = null;
       ro.disconnect();
       mc.remove(); cc.remove(); rc.remove();
       macdChart.current = mainChart.current = rsiChart.current = null;
@@ -627,6 +646,9 @@ export default function TradingChart({
       const total = candles.length;
       const range = { from: Math.max(0, total - 150), to: total - 1 + 8 };
       mainChart.current?.timeScale().setVisibleLogicalRange(range);
+
+      // Sync price scale widths so all three canvas areas have the same x-coordinates
+      setTimeout(() => syncScaleWidthsRef.current?.(), 80);
 
       unsub = subscribeLiveCandle(symbol, timeframe, (candle: Candle) => {
         cs.update(candle as never);
