@@ -520,25 +520,37 @@ export default function TradingChart({
     sync(rc, [mc, cc]);
 
     // ── Price scale width sync ──────────────────────────────────────────────────
-    // priceScale('right').width() returns the actual rendered price scale width.
-    // All three charts must have the same scale width so their canvas areas are
-    // equal — otherwise BTC's wider labels ("79,556.65") shift all its bars left
-    // relative to MACD and RSI which have narrower labels.
-    // NOTE: timeScale().width() returns 0 when timeScale.visible=false (MACD/main),
-    // so we use priceScale('right').width() which always works for visible scales.
+    // Measure the largest canvas in each chart container — that's the plot-area
+    // canvas (price scale canvas is narrower). If all three plot canvases have
+    // the same offsetWidth, bars are pixel-perfectly aligned. If not, the chart
+    // with the smallest plot canvas has the widest price scale; force all others
+    // to match via minimumWidth so every canvas becomes the same pixel width.
+    //
+    // We use offsetWidth (forces layout reflow) rather than the API's
+    // priceScale().width(), which only updates on resize()/applyOptions() and
+    // returns stale values after setData() changes the optimal scale width.
+    const getPlotW = (ref: HTMLDivElement | null) => {
+      if (!ref) return 0;
+      let max = 0;
+      ref.querySelectorAll('canvas').forEach((c) => { if ((c as HTMLCanvasElement).offsetWidth > max) max = (c as HTMLCanvasElement).offsetWidth; });
+      return max;
+    };
+
     let syncRaf = 0;
     const syncScaleWidths = (depth = 0) => {
       if (depth > 60) return;
-      const pw = [mc, cc, rc].map(c => c.priceScale('right').width());
-      // All zeros = chart not rendered yet, retry next frame
-      if (pw.every(w => w === 0)) {
+      const plots = [macdRef.current, mainRef.current, rsiRef.current].map(getPlotW);
+      // Zeros = canvases not in DOM yet, retry next frame
+      if (plots.some(w => w === 0)) {
         syncRaf = requestAnimationFrame(() => syncScaleWidths(depth + 1));
         return;
       }
-      const maxScaleW = Math.max(...pw);
-      // Already aligned — every scale is at the max width
-      if (pw.every(w => w === maxScaleW)) return;
-      [mc, cc, rc].forEach(c => c.applyOptions({ rightPriceScale: { minimumWidth: maxScaleW } }));
+      const minPlot = Math.min(...plots);
+      if (Math.max(...plots) - minPlot <= 1) return; // aligned within 1px tolerance
+      const containerW = mainRef.current?.clientWidth ?? 0;
+      if (!containerW) return;
+      const targetScaleW = containerW - minPlot;
+      [mc, cc, rc].forEach(c => c.applyOptions({ rightPriceScale: { minimumWidth: targetScaleW } }));
       syncRaf = requestAnimationFrame(() => syncScaleWidths(depth + 1)); // verify next frame
     };
 
