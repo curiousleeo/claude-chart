@@ -519,12 +519,28 @@ export default function TradingChart({
     sync(cc, [mc, rc]);
     sync(rc, [mc, cc]);
 
-    // ── Price scale width sync ── read actual rendered widths and force all to max
-    // so all three canvas areas are the same pixel width → bars align perfectly
-    const syncScaleWidths = () => {
-      const widths = [mc, cc, rc].map(c => c.priceScale('right').width());
-      const maxW = Math.max(...widths);
-      if (maxW > 0) [mc, cc, rc].forEach(c => c.applyOptions({ rightPriceScale: { minimumWidth: maxW } }));
+    // ── Price scale width sync ──────────────────────────────────────────────────
+    // timeScale().width() returns the plot-area (canvas) width for each chart.
+    // All three canvases must be the same pixel width for bars to align.
+    // If they differ, the chart with the widest price scale has the narrowest
+    // canvas — find the minimum canvas width and force all price scales to match
+    // the widest one, then retry via requestAnimationFrame until stable.
+    let syncRaf = 0;
+    const syncScaleWidths = (depth = 0) => {
+      if (depth > 60) return;
+      const tw = [mc, cc, rc].map(c => c.timeScale().width());
+      if (tw.some(w => w === 0)) {
+        syncRaf = requestAnimationFrame(() => syncScaleWidths(depth + 1));
+        return;
+      }
+      const minCanvasW = Math.min(...tw);
+      const maxCanvasW = Math.max(...tw);
+      if (maxCanvasW - minCanvasW <= 1) return; // within 1px rounding tolerance, done
+      const containerW = mainRef.current?.clientWidth ?? 0;
+      if (!containerW) return;
+      const targetScaleW = containerW - minCanvasW;
+      [mc, cc, rc].forEach(c => c.applyOptions({ rightPriceScale: { minimumWidth: targetScaleW } }));
+      syncRaf = requestAnimationFrame(() => syncScaleWidths(depth + 1)); // verify next frame
     };
 
     // ── Resize observer ── (guard against height=0 when pane is display:none)
@@ -534,7 +550,7 @@ export default function TradingChart({
       if (mainRef.current && mainRef.current.clientHeight > 0) cc.resize(mainRef.current.clientWidth, mainRef.current.clientHeight);
       if (rsiRef.current  && rsiRef.current.clientHeight  > 0) rc.resize(rsiRef.current.clientWidth,  rsiRef.current.clientHeight);
       if (syncTimer) clearTimeout(syncTimer);
-      syncTimer = setTimeout(syncScaleWidths, 50);
+      syncTimer = setTimeout(() => syncScaleWidths(0), 50);
     });
     if (macdRef.current) ro.observe(macdRef.current);
     if (mainRef.current) ro.observe(mainRef.current);
@@ -545,6 +561,7 @@ export default function TradingChart({
 
     return () => {
       if (syncTimer) clearTimeout(syncTimer);
+      cancelAnimationFrame(syncRaf);
       syncScaleWidthsRef.current = null;
       ro.disconnect();
       mc.remove(); cc.remove(); rc.remove();
@@ -647,8 +664,9 @@ export default function TradingChart({
       const range = { from: Math.max(0, total - 150), to: total - 1 + 8 };
       mainChart.current?.timeScale().setVisibleLogicalRange(range);
 
-      // Sync price scale widths so all three canvas areas have the same x-coordinates
-      setTimeout(() => syncScaleWidthsRef.current?.(), 80);
+      // Sync price scale widths after the chart renders its new data
+      requestAnimationFrame(() => syncScaleWidthsRef.current?.());
+      setTimeout(() => requestAnimationFrame(() => syncScaleWidthsRef.current?.()), 300);
 
       unsub = subscribeLiveCandle(symbol, timeframe, (candle: Candle) => {
         cs.update(candle as never);
