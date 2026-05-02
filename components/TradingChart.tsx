@@ -629,6 +629,21 @@ export default function TradingChart({
       const range = { from: Math.max(0, total - 150), to: total - 1 + 8 };
       mainChart.current?.timeScale().setVisibleLogicalRange(range);
 
+      // After setData, lightweight-charts fires a Full invalidation (via onMarksChanged)
+      // that calls _adjustSizeImpl() and sets each chart's actual scale width.
+      // Double-RAF ensures we read those widths AFTER that invalidation frame completes.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const mc2 = macdChart.current;
+        const cc2 = mainChart.current;
+        const rc2b = rsiChart.current;
+        if (!mc2 || !cc2 || !rc2b) return;
+        const ws = [mc2, cc2, rc2b].map(c => c.priceScale('right').width());
+        const maxW = Math.max(...ws);
+        if (maxW > Math.min(...ws)) {
+          [mc2, cc2, rc2b].forEach(c => c.applyOptions({ rightPriceScale: { minimumWidth: maxW } }));
+        }
+      }));
+
       unsub = subscribeLiveCandle(symbol, timeframe, (candle: Candle) => {
         cs.update(candle as never);
         onPriceChange(candle.close);
